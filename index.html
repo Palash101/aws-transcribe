@@ -16,6 +16,8 @@
             </div>
             <div class="button-container">
                 <button id="startButton">Start Transcription</button>
+                <button id="pauseButton">Pause Transcription</button>
+                <button id="resumeButton">Resume Transcription</button>
                 <button id="stopButton">Stop Transcription</button>
                 <button id="clearButton">Clear Transcript</button>
             </div>
@@ -26,6 +28,8 @@
                     <li>Click "Start Transcription" to begin recording.</li>
                     <li>Speak clearly into your microphone.</li>
                     <li>Watch as your speech is transcribed in real-time.</li>
+                    <li>Click "Pause Transcription" to pause recording.</li>
+                    <li>Click "Resume Transcription" to resume recording.</li>
                     <li>Click "Stop Transcription" when you're done.</li>
                     <li>Use "Clear Transcript" to remove all transcribed text.</li>
                 </ul>
@@ -37,7 +41,7 @@
     </div>
     <script>
         const token = 'your-auth-token'; // Replace with actual token
-        const username = 'abilash'; // Replace with actual username
+        const username = 'abhilash sharma'; // Replace with actual username
         const socket = io('/transcribe', {
             auth: { token, username }
         }); // Connect to the transcribe namespace with authentication token and username
@@ -47,6 +51,8 @@
         let processor;
         let bufferedAudioData = [];
         const startButton = document.getElementById('startButton');
+        const pauseButton = document.getElementById('pauseButton');
+        const resumeButton = document.getElementById('resumeButton');
         const stopButton = document.getElementById('stopButton');
         const clearButton = document.getElementById('clearButton');
         const statusText = document.getElementById('statusText');
@@ -57,10 +63,32 @@
         let lastFinalIndex = 0;
         let accumulatedAudioData = [];
         let lastEmitTime = Date.now();
+        let isConnected = true;
+        let isRecording = false;
+        let isPaused = false;
 
         startButton.addEventListener('click', startRecording);
+        pauseButton.addEventListener('click', pauseRecording);
+        resumeButton.addEventListener('click', resumeRecording);
         stopButton.addEventListener('click', stopRecording);
         clearButton.addEventListener('click', clearTranscript);
+
+        window.addEventListener('offline', () => {
+            console.log('Internet connection lost');
+            isConnected = false;
+            if (isRecording) {
+                stopRecording();
+            }
+        });
+
+        window.addEventListener('online', () => {
+            console.log('Internet connection restored');
+            isConnected = true;
+            if (isRecording) {
+                startRecording();
+            }
+            checkConnectionAndSendData();
+        });
 
         function updateStatus(status) {
             console.log('Status updated:', status);
@@ -80,6 +108,7 @@
                 processor.connect(audioContext.destination);
 
                 processor.onaudioprocess = (e) => {
+                    if (isPaused) return;
                     const float32Array = e.inputBuffer.getChannelData(0);
                     const int16Array = new Int16Array(float32Array.length);
                     for (let i = 0; i < float32Array.length; i++) {
@@ -89,7 +118,7 @@
                     accumulatedAudioData.push(int16Array);
 
                     const currentTime = Date.now();
-                    if (socket.connected && currentTime - lastEmitTime >= 10000) { // Send data every 5 seconds
+                    if (isConnected && currentTime - lastEmitTime >= 5000) { // Send data every 5 seconds
                         console.log("sending =========  ")
                         // Send accumulated data every 5 seconds
                         const audioBuffer = new ArrayBuffer(accumulatedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
@@ -109,12 +138,24 @@
                 socket.emit('startTranscription');
                 console.log('startTranscription event emitted');
                 updateStatus('Recording');
-
-                // setInterval(checkConnectionAndSendData, 10000);
+                isRecording = true;
+                isPaused = false;
             } catch (error) {
                 console.error('Error accessing microphone:', error);
                 updateStatus('Error: ' + error.message);
             }
+        }
+
+        function pauseRecording() {
+            console.log('Pause button clicked');
+            isPaused = true;
+            updateStatus('Paused');
+        }
+
+        function resumeRecording() {
+            console.log('Resume button clicked');
+            isPaused = false;
+            updateStatus('Recording');
         }
 
         function stopRecording() {
@@ -125,6 +166,7 @@
                 audioContext.close();
                 socket.emit('stopTranscription');
                 updateStatus('Not recording');
+                isRecording = false;
             }
         }
 
@@ -136,10 +178,18 @@
         }
 
         function checkConnectionAndSendData() {
-            if (socket.connected && bufferedAudioData.length > 0) {
-                console.log('Sending buffered audio data to server, chunks:', bufferedAudioData.length);
-                bufferedAudioData.forEach(chunk => socket.emit('audioData', chunk));
-                bufferedAudioData = [];
+            if (socket.connected && accumulatedAudioData.length > 0) {
+                console.log('Sending buffered audio data to server, chunks:', accumulatedAudioData.length);
+                const audioBuffer = new ArrayBuffer(accumulatedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
+                let offset = 0;
+                accumulatedAudioData.forEach((data) => {
+                    new Uint8Array(audioBuffer, offset, data.byteLength).set(new Uint8Array(data.buffer));
+                    offset += data.byteLength;
+                });
+
+                console.log('Sending accumulated audio data, size:', audioBuffer.byteLength);
+                socket.emit('audioData', audioBuffer);
+                accumulatedAudioData = []; // Reset after sending
             } else if (!socket.connected) {
                 console.log('Socket not connected, retrying in 10 seconds');
             }

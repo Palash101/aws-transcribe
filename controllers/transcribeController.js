@@ -1,16 +1,22 @@
 const { TranscribeStreamingClient, StartStreamTranscriptionCommand } = require("@aws-sdk/client-transcribe-streaming");
 
 const transcribeClient = new TranscribeStreamingClient({
-    region: "us-west-2", // Ensure this matches your AWS region
+    region: "eu-west-1",
+    credentials: {
+        accessKeyId: "AKIASFIXCTYKF72YU6LJ",
+        secretAccessKey: "ciO3suOrG1Aa4ENcEZrXr5Gf338BnfSkhL27pbbQ"
+    }
 });
 
 exports.handleConnection = (socket) => {
-    const username = socket.name; // Use the username from the socket object
+    const username = socket.handshake.auth.username; // Use the username from the socket object
     console.log(`User ${username} connected`);
 
     let audioStream;
     let lastTranscript = '';
     let isTranscribing = false;
+    let lastAudioReceivedTime = Date.now();
+    let audioTimeout;
 
     socket.on('startTranscription', async () => {
         console.log(`User ${username} starting transcription`);
@@ -22,6 +28,7 @@ exports.handleConnection = (socket) => {
                 const chunk = await new Promise(resolve => socket.once('audioData', resolve));
                 if (chunk === null) break;
                 buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
+                lastAudioReceivedTime = Date.now();
                 console.log('Received audio chunk, buffer size:', buffer.length);
 
                 while (buffer.length >= 1024) {
@@ -38,38 +45,50 @@ exports.handleConnection = (socket) => {
             AudioStream: audioStream()
         });
 
-        try {
-            console.log(`User ${username} sending command to AWS Transcribe`);
-            const response = await transcribeClient.send(command);
-            console.log(`User ${username} received response from AWS Transcribe`);
-            
-            for await (const event of response.TranscriptResultStream) {
-                if (!isTranscribing) break;
-                if (event.TranscriptEvent) {
-                    console.log('Received TranscriptEvent:', JSON.stringify(event.TranscriptEvent));
-                    const results = event.TranscriptEvent.Transcript.Results;
-                    if (results.length > 0 && results[0].Alternatives.length > 0) {
-                        const transcript = results[0].Alternatives[0].Transcript;
-                        const isFinal = !results[0].IsPartial;
+        const sendCommand = async () => {
+            try {
+                console.log(`User ${username} sending command to AWS Transcribe`);
+                const response = await transcribeClient.send(command);
+                console.log(`User ${username} received response from AWS Transcribe`);
+                
+                for await (const event of response.TranscriptResultStream) {
+                    if (!isTranscribing) break;
+                    if (event.TranscriptEvent) {
+                        console.log('Received TranscriptEvent:', JSON.stringify(event.TranscriptEvent));
+                        const results = event.TranscriptEvent.Transcript.Results;
+                        if (results.length > 0 && results[0].Alternatives.length > 0) {
+                            const transcript = results[0].Alternatives[0].Transcript;
+                            const isFinal = !results[0].IsPartial;
 
-                        if (isFinal) {
-                            console.log(`User ${username} emitting final transcription:`, transcript);
-                            socket.emit('transcription', { text: transcript, isFinal: true });
-                            lastTranscript = transcript;
-                        } else {
-                            const newPart = transcript.substring(lastTranscript.length);
-                            if (newPart.trim() !== '') {
-                                console.log(`User ${username} emitting partial transcription:`, newPart);
-                                socket.emit('transcription', { text: newPart, isFinal: false });
+                            if (isFinal) {
+                                console.log(`User ${username} emitting final transcription:`, transcript);
+                                socket.emit('transcription', { text: transcript, isFinal: true });
+                                lastTranscript = transcript;
+                            } else {
+                                const newPart = transcript.substring(lastTranscript.length);
+                                if (newPart.trim() !== '') {
+                                    console.log(`User ${username} emitting partial transcription:`, newPart);
+                                    socket.emit('transcription', { text: newPart, isFinal: false });
+                                }
                             }
                         }
                     }
                 }
+            } catch (error) {
+                console.error(`User ${username} transcription error:`, error);
+                socket.emit('error', 'Transcription error occurred: ' + error.message);
             }
-        } catch (error) {
-            console.error(`User ${username} transcription error:`, error);
-            socket.emit('error', 'Transcription error occurred: ' + error.message);
-        }
+        };
+
+        audioTimeout = setInterval(() => {
+            if (Date.now() - lastAudioReceivedTime > 15000) {
+                console.log(`User ${username} audio timeout, stopping transcription`);
+                isTranscribing = false;
+                clearInterval(audioTimeout);
+            }
+        }, 5000);
+
+        sendCommand();
     });
 
     socket.on('audioData', (data) => {
@@ -84,11 +103,13 @@ exports.handleConnection = (socket) => {
         isTranscribing = false;
         audioStream = null;
         lastTranscript = '';
+        clearInterval(audioTimeout);
     });
 
     socket.on('disconnect', () => {
         console.log(`User ${username} disconnected`);
         isTranscribing = false;
         audioStream = null;
+        clearInterval(audioTimeout);
     });
 };
