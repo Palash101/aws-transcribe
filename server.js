@@ -20,7 +20,12 @@ io.use(authenticateUser);
 
 // Namespace for transcription
 const transcribeNamespace = io.of('/transcribe');
-transcribeNamespace.on('connection', transcribeController.handleConnection);
+transcribeNamespace.on('connection', (socket) => {
+    console.log('User connected:', socket);
+    const username = socket.handshake.auth.username;
+    socket.join(username); // Join a private room for the user
+    transcribeController.handleConnection(socket, username);
+});
 
 // You can add more namespaces here for different purposes
 // const anotherNamespace = io.of('/another');

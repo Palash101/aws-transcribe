@@ -42,9 +42,10 @@
     <script>
         const token = 'your-auth-token'; // Replace with actual token
         const username = 'abhilash sharma'; // Replace with actual username
+        const room = 'user-room'; // Replace with actual room name
         const socket = io('/transcribe', {
-            auth: { token, username }
-        }); // Connect to the transcribe namespace with authentication token and username
+            auth: { token, username, room }
+        }); // Connect to the transcribe namespace with authentication token, username, and room
 
         let audioContext;
         let audioInput;

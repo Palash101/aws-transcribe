@@ -8,8 +8,7 @@ const transcribeClient = new TranscribeStreamingClient({
     }
 });
 
-exports.handleConnection = (socket) => {
-    const username = socket.handshake.auth.username; // Use the username from the socket object
+exports.handleConnection = (socket, username) => {
     console.log(`User ${username} connected`);
 
     let audioStream;
@@ -62,13 +61,13 @@ exports.handleConnection = (socket) => {
 
                             if (isFinal) {
                                 console.log(`User ${username} emitting final transcription:`, transcript);
-                                socket.emit('transcription', { text: transcript, isFinal: true });
+                                socket.to(username).emit('transcription', { text: transcript, isFinal: true });
                                 lastTranscript = transcript;
                             } else {
                                 const newPart = transcript.substring(lastTranscript.length);
                                 if (newPart.trim() !== '') {
                                     console.log(`User ${username} emitting partial transcription:`, newPart);
-                                    socket.emit('transcription', { text: newPart, isFinal: false });
+                                    socket.to(username).emit('transcription', { text: newPart, isFinal: false });
                                 }
                             }
                         }
@@ -76,7 +75,7 @@ exports.handleConnection = (socket) => {
                 }
             } catch (error) {
                 console.error(`User ${username} transcription error:`, error);
-                socket.emit('error', 'Transcription error occurred: ' + error.message);
+                socket.to(username).emit('error', 'Transcription error occurred: ' + error.message);
             }
         };
 
