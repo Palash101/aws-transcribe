@@ -46,14 +46,14 @@ exports.handleConnection = (socket, username) => {
 
         const sendCommand = async () => {
             try {
-                console.log(`User ${username} sending command to AWS Transcribe`);
+                // console.log(`User ${username} sending command to AWS Transcribe`);
                 const response = await transcribeClient.send(command);
-                console.log(`User ${username} received response from AWS Transcribe`);
-                
+                // console.log(`User ${username} received response from AWS Transcribe`);
+
                 for await (const event of response.TranscriptResultStream) {
                     if (!isTranscribing) break;
                     if (event.TranscriptEvent) {
-                        console.log('Received TranscriptEvent:', JSON.stringify(event.TranscriptEvent));
+                        // console.log('Received TranscriptEvent:', JSON.stringify(event.TranscriptEvent));
                         const results = event.TranscriptEvent.Transcript.Results;
                         if (results.length > 0 && results[0].Alternatives.length > 0) {
                             const transcript = results[0].Alternatives[0].Transcript;
@@ -61,13 +61,13 @@ exports.handleConnection = (socket, username) => {
 
                             if (isFinal) {
                                 console.log(`User ${username} emitting final transcription:`, transcript);
-                                socket.to(username).emit('transcription', { text: transcript, isFinal: true });
+                                socket.emit('transcription', { text: transcript, isFinal: true });
                                 lastTranscript = transcript;
                             } else {
                                 const newPart = transcript.substring(lastTranscript.length);
                                 if (newPart.trim() !== '') {
                                     console.log(`User ${username} emitting partial transcription:`, newPart);
-                                    socket.to(username).emit('transcription', { text: newPart, isFinal: false });
+                                    socket.emit('transcription', { text: newPart, isFinal: false });
                                 }
                             }
                         }
@@ -76,6 +76,13 @@ exports.handleConnection = (socket, username) => {
             } catch (error) {
                 console.error(`User ${username} transcription error:`, error);
                 socket.to(username).emit('error', 'Transcription error occurred: ' + error.message);
+                if (error.name === 'BadRequestException' && error.message.includes('no new audio was received for 15 seconds')) {
+                    console.log(`User ${username} restarting transcription due to timeout`);
+                    isTranscribing = false;
+                    clearInterval(audioTimeout);
+                    socket.emit('stopTranscription');
+                    socket.emit('startTranscription');
+                }
             }
         };
 
@@ -84,6 +91,7 @@ exports.handleConnection = (socket, username) => {
                 console.log(`User ${username} audio timeout, stopping transcription`);
                 isTranscribing = false;
                 clearInterval(audioTimeout);
+                socket.emit('stopTranscription');
             }
         }, 5000);
 

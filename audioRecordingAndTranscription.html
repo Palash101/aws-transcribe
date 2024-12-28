@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Recording and Transcription</title>
+</head>
+<body>
+    <h1>Audio Recording and Transcription</h1>
+    <button id="startButton">Start Recording</button>
+    <button id="pauseButton">Pause Recording</button>
+    <button id="resumeButton">Resume Recording</button>
+    <button id="stopButton">Stop Recording</button>
+    <button id="clearButton">Clear Transcript</button>
+    <p id="statusText">Status: Not Recording</p>
+    <p id="statusIndicator">⚪</p>
+    <div id="transcript"></div>
+
+    <script>
+        const clearButton = document.getElementById('clearButton');
+        const statusText = document.getElementById('statusText');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const transcript = document.getElementById('transcript');
+
+        let currentTranscript = '';
+        let lastFinalIndex = 0;
+        let accumulatedAudioData = [];
+        let lastEmitTime = Date.now();
+        let isConnected = true;
+        let isRecording = false;
+        let isPaused = false;
+
+        startButton.addEventListener('click', startRecording);
+        pauseButton.addEventListener('click', pauseRecording);
+        resumeButton.addEventListener('click', resumeRecording);
+        stopButton.addEventListener('click', stopRecording);
+        clearButton.addEventListener('click', clearTranscript);
+
+        window.addEventListener('offline', () => {
+            console.log('Internet connection lost');
+            isConnected = false;
+            console.log("isRecording: ", isRecording);
+        });
+
+        window.addEventListener('online', () => {
+            console.log('Internet connection restored');
+            isConnected = true;
+            checkConnectionAndSendData();
+        });
+
+        function updateStatus(status) {
+            console.log('Status updated:', status);
+            statusText.textContent = status;
+            statusIndicator.textContent = status === 'Recording' ? '🔴' : '⚪';
+        }
+
+        async function startRecording() {
+            console.log('Start button clicked');
+            try {
+                // Add your recording logic here
+            } catch (error) {
+                console.error('Error starting recording:', error);
+            }
+        }
+
+        function pauseRecording() {
+            console.log('Pause button clicked');
+            // Add your pause logic here
+        }
+
+        function resumeRecording() {
+            console.log('Resume button clicked');
+            // Add your resume logic here
+        }
+
+        function stopRecording() {
+            console.log('Stop button clicked');
+            // Add your stop logic here
+        }
+
+        function clearTranscript() {
+            console.log('Clear button clicked');
+            transcript.innerHTML = '';
+            currentTranscript = '';
+        }
+
+        function checkConnectionAndSendData() {
+            if (isConnected && accumulatedAudioData.length > 0) {
+                console.log('Sending accumulated audio data');
+                // Add your data sending logic here
+            }
+        }
+    </script>
+</body>
+</html>

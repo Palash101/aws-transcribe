@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,6 +8,7 @@
     <script src="/socket.io/socket.io.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
     <div class="page-container">
         <div class="container">
@@ -77,18 +79,19 @@
         window.addEventListener('offline', () => {
             console.log('Internet connection lost');
             isConnected = false;
-            if (isRecording) {
-                stopRecording();
-            }
         });
 
         window.addEventListener('online', () => {
             console.log('Internet connection restored');
             isConnected = true;
-            if (isRecording) {
-                startRecording();
+            //  if (isRecording) {
+            //      startRecording();
+            //  }
+            if (bufferedAudioData.length > 0) {
+                flushBufferedAudioData();
+            } else {
+                sendAccumulatedAudioData();
             }
-            checkConnectionAndSendData();
         });
 
         function updateStatus(status) {
@@ -116,23 +119,35 @@
                         int16Array[i] = Math.max(-32768, Math.min(32767, Math.floor(float32Array[i] * 32768)));
                     }
                     console.log('Processing audio chunk, size:', int16Array.buffer.byteLength);
-                    accumulatedAudioData.push(int16Array);
+                    if (isConnected) {
+                        accumulatedAudioData.push(int16Array);
+                    } else {
+                        bufferedAudioData.push(int16Array);
+                    }
+
 
                     const currentTime = Date.now();
-                    if (isConnected && currentTime - lastEmitTime >= 5000) { // Send data every 5 seconds
+                    if (isConnected) { // Send data every 5 seconds
                         console.log("sending =========  ")
+                        console.log("Accumlateing audio without connection:=======> ", accumulatedAudioData.length);
                         // Send accumulated data every 5 seconds
                         const audioBuffer = new ArrayBuffer(accumulatedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
                         let offset = 0;
-                        accumulatedAudioData.forEach((data) => {
+
+                        for (let i = 0; i < accumulatedAudioData.length; i++) {
+                            const data = accumulatedAudioData[i];
                             new Uint8Array(audioBuffer, offset, data.byteLength).set(new Uint8Array(data.buffer));
                             offset += data.byteLength;
-                        });
+                        }
 
                         console.log('Sending accumulated audio data, size:', audioBuffer.byteLength);
                         socket.emit('audioData', audioBuffer);
                         accumulatedAudioData = []; // Reset after sending
+
+
                         lastEmitTime = currentTime; // Update last emit time
+                    } else {
+                        console.log("Accumlateing audio without connection:=======> ", accumulatedAudioData.length);
                     }
                 };
 
@@ -178,9 +193,8 @@
             transcript.textContent = '';
         }
 
-        function checkConnectionAndSendData() {
-            if (socket.connected && accumulatedAudioData.length > 0) {
-                console.log('Sending buffered audio data to server, chunks:', accumulatedAudioData.length);
+        function sendAccumulatedAudioData() {
+            if (accumulatedAudioData.length > 0) {
                 const audioBuffer = new ArrayBuffer(accumulatedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
                 let offset = 0;
                 accumulatedAudioData.forEach((data) => {
@@ -191,8 +205,22 @@
                 console.log('Sending accumulated audio data, size:', audioBuffer.byteLength);
                 socket.emit('audioData', audioBuffer);
                 accumulatedAudioData = []; // Reset after sending
-            } else if (!socket.connected) {
-                console.log('Socket not connected, retrying in 10 seconds');
+            }
+        }
+
+
+        function flushBufferedAudioData() {
+            if (bufferedAudioData.length > 0) {
+                const audioBuffer = new ArrayBuffer(bufferedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
+                let offset = 0;
+                bufferedAudioData.forEach((data) => {
+                    new Uint8Array(audioBuffer, offset, data.byteLength).set(new Uint8Array(data.buffer));
+                    offset += data.byteLength;
+                });
+
+                console.log('Sending buffered audio data, size:', audioBuffer.byteLength);
+                socket.emit('audioData', audioBuffer);
+                bufferedAudioData = []; // Reset after sending
             }
         }
 
@@ -216,4 +244,5 @@
         console.log('Client-side script loaded');
     </script>
 </body>
+
 </html>
