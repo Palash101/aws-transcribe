@@ -45,14 +45,15 @@
         const token = 'your-auth-token'; // Replace with actual token
         const username = 'abhilash sharma'; // Replace with actual username
         const room = 'user-room'; // Replace with actual room name
+        
         const socket = io('/transcribe', {
+            autoConnect:false,
             auth: { token, username, room }
-        }); // Connect to the transcribe namespace with authentication token, username, and room
+        }); 
 
         let audioContext;
         let audioInput;
         let processor;
-        let bufferedAudioData = [];
         const startButton = document.getElementById('startButton');
         const pauseButton = document.getElementById('pauseButton');
         const resumeButton = document.getElementById('resumeButton');
@@ -65,12 +66,17 @@
         let currentTranscript = '';
         let lastFinalIndex = 0;
         let accumulatedAudioData = [];
+        let bufferedAudioData = [];
         let lastEmitTime = Date.now();
-        let isConnected = true;
+        let isConnected = false;
         let isRecording = false;
         let isPaused = false;
+        let firstHit = false;
+        let socketConnected = false;
+        let shouldFlushOfflineData = false;
+        let transcriptEventStarted = false;
 
-        startButton.addEventListener('click', startRecording);
+        startButton.addEventListener('click', onClickStartTranscription);
         pauseButton.addEventListener('click', pauseRecording);
         resumeButton.addEventListener('click', resumeRecording);
         stopButton.addEventListener('click', stopRecording);
@@ -78,27 +84,116 @@
 
         window.addEventListener('offline', () => {
             console.log('Internet connection lost');
+            closeSocketConnection()
             isConnected = false;
+            shouldFlushOfflineData = true;
         });
 
         window.addEventListener('online', () => {
             console.log('Internet connection restored');
-            isConnected = true;
-            //  if (isRecording) {
-            //      startRecording();
-            //  }
+            inititateSocketConnection()
+            inititateTranscribe()
+            if(shouldFlushOfflineData){
             if (bufferedAudioData.length > 0) {
                 flushBufferedAudioData();
             } else {
                 sendAccumulatedAudioData();
             }
+
+            }
+
         });
+
+
+        function onClickStartTranscription(){
+            transcriptEventStarted = true;
+            if(!firstHit){
+                firstHit = true;
+            }
+            // First initate recording 
+            if(!isRecording){
+                startRecording();
+            }
+
+            // Seconf initiate socket connection
+            inititateSocketConnection();
+
+            // Third initiate transcription
+            // startAudioTranscribe()
+
+        }
 
         function updateStatus(status) {
             console.log('Status updated:', status);
             statusText.textContent = status;
             statusIndicator.textContent = status === 'Recording' ? '🔴' : '⚪';
         }
+
+        function inititateSocketConnection(){
+            socket.connect();  
+            isConnected = true;
+        }
+
+        function closeSocketConnection(){
+            socket.disconnect();
+            isConnected = false;
+
+        }
+
+        function inititateTranscribe(){
+            if (isConnected) {
+                socket.emit('startTranscription');
+            }
+        }
+
+        function startAudioTranscribe(){
+            if (isConnected && transcriptEventStarted) {
+                // check if audio with internet connection has some length 
+                // assuming audio collected during offline mode if comes first
+                if(bufferedAudioData.length > 0){
+                    flushBufferedAudioData();
+
+                }
+                else{
+                    sendAccumulatedAudioData();
+                }
+
+            }
+
+        }
+
+        function sendAccumulatedAudioData() {
+            if (accumulatedAudioData.length > 0) {
+                const audioBuffer = new ArrayBuffer(accumulatedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
+                let offset = 0;
+                accumulatedAudioData.forEach((data) => {
+                    new Uint8Array(audioBuffer, offset, data.byteLength).set(new Uint8Array(data.buffer));
+                    offset += data.byteLength;
+                });
+
+                console.log('Sending accumulated audio data, size:', audioBuffer.byteLength);
+                socket.emit('audioData', audioBuffer);
+                accumulatedAudioData = []; // Reset after sending
+            }
+        }
+
+        function flushBufferedAudioData() {
+            if (bufferedAudioData.length > 0) {
+                const audioBuffer = new ArrayBuffer(bufferedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
+                let offset = 0;
+                bufferedAudioData.forEach((data) => {
+                    new Uint8Array(audioBuffer, offset, data.byteLength).set(new Uint8Array(data.buffer));
+                    offset += data.byteLength;
+                });
+
+                console.log('Sending buffered audio data, size:', audioBuffer.byteLength);
+                socket.emit('audioData', audioBuffer);
+                bufferedAudioData = []; // Reset after sending
+            }
+        }
+
+
+
 
         async function startRecording() {
             console.log('Start button clicked');
@@ -124,35 +219,14 @@
                     } else {
                         bufferedAudioData.push(int16Array);
                     }
+                    if(isConnected){
 
-
-                    const currentTime = Date.now();
-                    if (isConnected) { // Send data every 5 seconds
-                        console.log("sending =========  ")
-                        console.log("Accumlateing audio without connection:=======> ", accumulatedAudioData.length);
-                        // Send accumulated data every 5 seconds
-                        const audioBuffer = new ArrayBuffer(accumulatedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
-                        let offset = 0;
-
-                        for (let i = 0; i < accumulatedAudioData.length; i++) {
-                            const data = accumulatedAudioData[i];
-                            new Uint8Array(audioBuffer, offset, data.byteLength).set(new Uint8Array(data.buffer));
-                            offset += data.byteLength;
-                        }
-
-                        console.log('Sending accumulated audio data, size:', audioBuffer.byteLength);
-                        socket.emit('audioData', audioBuffer);
-                        accumulatedAudioData = []; // Reset after sending
-
-
-                        lastEmitTime = currentTime; // Update last emit time
-                    } else {
-                        console.log("Accumlateing audio without connection:=======> ", accumulatedAudioData.length);
+                        startAudioTranscribe()
                     }
                 };
+                inititateTranscribe()
 
-                socket.emit('startTranscription');
-                console.log('startTranscription event emitted');
+                // socket.emit('startTranscription');
                 updateStatus('Recording');
                 isRecording = true;
                 isPaused = false;
@@ -184,6 +258,7 @@
                 updateStatus('Not recording');
                 isRecording = false;
             }
+            closeSocketConnection();
         }
 
         function clearTranscript() {
@@ -193,36 +268,7 @@
             transcript.textContent = '';
         }
 
-        function sendAccumulatedAudioData() {
-            if (accumulatedAudioData.length > 0) {
-                const audioBuffer = new ArrayBuffer(accumulatedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
-                let offset = 0;
-                accumulatedAudioData.forEach((data) => {
-                    new Uint8Array(audioBuffer, offset, data.byteLength).set(new Uint8Array(data.buffer));
-                    offset += data.byteLength;
-                });
-
-                console.log('Sending accumulated audio data, size:', audioBuffer.byteLength);
-                socket.emit('audioData', audioBuffer);
-                accumulatedAudioData = []; // Reset after sending
-            }
-        }
-
-
-        function flushBufferedAudioData() {
-            if (bufferedAudioData.length > 0) {
-                const audioBuffer = new ArrayBuffer(bufferedAudioData.reduce((acc, data) => acc + data.byteLength, 0));
-                let offset = 0;
-                bufferedAudioData.forEach((data) => {
-                    new Uint8Array(audioBuffer, offset, data.byteLength).set(new Uint8Array(data.buffer));
-                    offset += data.byteLength;
-                });
-
-                console.log('Sending buffered audio data, size:', audioBuffer.byteLength);
-                socket.emit('audioData', audioBuffer);
-                bufferedAudioData = []; // Reset after sending
-            }
-        }
+      
 
         socket.on('transcription', data => {
             console.log('Received transcription:', data);
@@ -239,6 +285,14 @@
         socket.on('error', errorMessage => {
             console.error('Server error:', errorMessage);
             transcript.textContent += '\nError: ' + errorMessage;
+        });
+
+        socket.on('reinitate',reinitate => {
+            console.log('Reinitiate:', reinitate);
+            inititateSocketConnection()
+            console.log('Reinitate:', reinitate);
+            inititateTranscribe()
+
         });
 
         console.log('Client-side script loaded');

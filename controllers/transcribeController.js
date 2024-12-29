@@ -47,7 +47,7 @@ exports.handleConnection = (socket, username) => {
         const sendCommand = async () => {
             try {
                 // console.log(`User ${username} sending command to AWS Transcribe`);
-                const response = await transcribeClient.send(command);
+                const response = await transcribeClient.send(command).catch((error) => {error,"==? erro"}  );
                 // console.log(`User ${username} received response from AWS Transcribe`);
 
                 for await (const event of response.TranscriptResultStream) {
@@ -74,49 +74,58 @@ exports.handleConnection = (socket, username) => {
                     }
                 }
             } catch (error) {
+                transcribeClient.destroy();
+
                 console.error(`User ${username} transcription error:`, error);
-                socket.to(username).emit('error', 'Transcription error occurred: ' + error.message);
+                socket.emit('reinitate',{hasError:true});
+
+                // socket.to(username).emit('error', 'Transcription error occurred: ' + error.message);
                 if (error.name === 'BadRequestException' && error.message.includes('no new audio was received for 15 seconds')) {
                     console.log(`User ${username} restarting transcription due to timeout`);
                     isTranscribing = false;
-                    clearInterval(audioTimeout);
+                    // clearInterval(audioTimeout);
                     socket.emit('stopTranscription');
                     socket.emit('startTranscription');
                 }
             }
         };
 
-        audioTimeout = setInterval(() => {
-            if (Date.now() - lastAudioReceivedTime > 15000) {
-                console.log(`User ${username} audio timeout, stopping transcription`);
-                isTranscribing = false;
-                clearInterval(audioTimeout);
-                socket.emit('stopTranscription');
-            }
-        }, 5000);
 
-        sendCommand();
+        sendCommand().catch((error) => {
+            transcribeClient.destroy();
+
+
+        });
     });
 
     socket.on('audioData', (data) => {
         if (isTranscribing) {
             console.log(`User ${username} received audioData event, data size:`, data.byteLength);
             socket.emit('audioData', data);
+            lastAudioReceivedTime = Date.now();
         }
     });
+
+    audioTimeout = setInterval(() => {
+        if (isTranscribing && Date.now() - lastAudioReceivedTime > 10000) {
+            console.log(`User ${username} no audio data received for 10 seconds, stopping transcription`);
+            isTranscribing = false;
+            transcribeClient.destroy();
+            socket.emit('stopTranscription');
+        }
+    }, 10000);
 
     socket.on('stopTranscription', () => {
         console.log(`User ${username} stopping transcription`);
         isTranscribing = false;
         audioStream = null;
         lastTranscript = '';
-        clearInterval(audioTimeout);
     });
 
     socket.on('disconnect', () => {
         console.log(`User ${username} disconnected`);
+        transcribeClient.destroy();
         isTranscribing = false;
         audioStream = null;
-        clearInterval(audioTimeout);
     });
 };
