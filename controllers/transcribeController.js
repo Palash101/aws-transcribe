@@ -92,6 +92,7 @@ exports.handleConnection = (socket, username) => {
 
 
         sendCommand().catch((error) => {
+            console.log('Send Command Error:', error);
             transcribeClient.destroy();
 
 
@@ -106,14 +107,14 @@ exports.handleConnection = (socket, username) => {
         }
     });
 
-    audioTimeout = setInterval(() => {
-        if (isTranscribing && Date.now() - lastAudioReceivedTime > 10000) {
-            console.log(`User ${username} no audio data received for 10 seconds, stopping transcription`);
-            isTranscribing = false;
-            transcribeClient.destroy();
-            socket.emit('stopTranscription');
-        }
-    }, 10000);
+    // audioTimeout = setInterval(() => {
+    //     if (isTranscribing && Date.now() - lastAudioReceivedTime > 10000) {
+    //         console.log(`User ${username} no audio data received for 10 seconds, stopping transcription`);
+    //         isTranscribing = false;
+    //         transcribeClient.destroy();
+    //         socket.emit('stopTranscription');
+    //     }
+    // }, 10000);
 
     socket.on('stopTranscription', () => {
         console.log(`User ${username} stopping transcription`);
